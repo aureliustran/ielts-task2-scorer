@@ -6,3 +6,4 @@
 **/.env
 **/*.exe
 worker/.cache
+.idea/
