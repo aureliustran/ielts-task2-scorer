@@ -5,3 +5,4 @@
 **/build
 **/.env
 **/*.exe
+worker/.cache
