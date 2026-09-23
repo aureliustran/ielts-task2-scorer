@@ -57,11 +57,18 @@ to the model.
 | `word_count < 250` | `scored` | from P3 | called with `underlength=true` |
 | otherwise | `scored` | from P3 | called |
 
-- The ≤20 → band 1 rule and the 0 rule must be checked against the fetched rubric text in
-  task T1 before they are hardcoded.
-- Under 250 words there's no fixed deduction. Task Response judges it, and the UI shows an
-  "under 250 words" warning.
-- Detecting non-English essays is not implemented (open question §10.1).
+- **Checked against the rubric (T1, `rubric/task2_band_descriptors.md`):**
+  - ≤20 words → band 1: confirmed. "Responses of 20 words or fewer are rated at Band 1"
+    appears in bold under all four criteria.
+  - Empty → band 0: confirmed. Band 0 applies where a candidate "did not attend or attempt
+    the question in any way".
+  - Band 0 also covers "used a language other than English throughout" (§10.1) and proven
+    total memorisation. Memorisation needs proof the scorer can't have, so it's out of scope.
+- Under 250 words there's no fixed deduction, and the rubric mentions length only in
+  qualitative terms (LR band 3 "significantly underlength", GRA band 3 "Length may be
+  insufficient"). Task Response judges it, and the UI shows an "under 250 words" warning.
+- The rubric says "Any copied rubric must be discounted" (TR band 1). `word_count`
+  currently includes text copied from the question (open question §10.4).
 
 ## 4. Features (deterministic, `features/`)
 
@@ -429,11 +436,27 @@ def quotes_verified(quotes: list[str], essay: str) -> list[bool]:
 
 ## 10. Open questions (need a decision before the related code is written)
 
-1. **Non-English essays.** The public descriptors treat them specially. Detecting them
-   needs a language-ID library, which isn't in the deps. Until decided, only empty essays
-   are `rejected`.
+1. **Non-English essays.** The rule is settled: the rubric's band 0 covers a response that
+   "used a language other than English throughout". How to detect it is not: that needs a
+   language-ID library (not in the deps) and a definition of "throughout". Until decided,
+   only empty essays are `rejected`.
 2. **Enforce the 8+ rule in code?** P3 says an 8 or 9 needs two verbatim quotes. Code
    could cap the band at 7 when fewer than 2 of that criterion's quotes pass
    `quotes_verified`. Not implemented until you decide.
-3. **Overall rounding.** Round-down is unverified. Confirm against an official source, or
-   leave it and state the assumption in EVAL.md.
+3. **Overall rounding.** Round-down is unverified, and the band descriptors don't cover
+   it. Confirm against another official source, or leave it and state the assumption in
+   EVAL.md.
+4. **Copied question text.** "Any copied rubric must be discounted" (TR band 1). Should
+   the pre-check word count (§3) exclude text copied from the question? That needs a copy
+   rule, e.g. which spans count as copied (`lr.prompt_overlap_ratio` measures 3-gram
+   overlap but doesn't mark spans). Until decided, `word_count` includes copied text, and
+   P3 sees `lr.prompt_overlap_ratio` in the evidence block.
+5. **Rubric limiters as code caps or conflict flags.** The rubric's bold text marks
+   "negative features that will limit a rating". Two of them match features we already
+   measure:
+   - "**Paragraphing may be inadequate or missing.**" (CC band 5) ↔ `cc.paragraph_count`
+   - "**Subordinate clauses are rare and simple sentences predominate.**" (GRA band 4) ↔
+     `gra.complex_sentence_ratio`
+
+   The rubric gives no counts, so the feature values that trigger them need calibrating
+   from the eval set (task L4). Decide then: a hard cap in code, or only a conflict flag.

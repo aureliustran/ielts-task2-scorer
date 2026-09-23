@@ -48,6 +48,9 @@ Out of scope: any feature logic.
 
 ## T1 — Rubric
 
+**Done 2026-09-23.** `rubric/task2_band_descriptors.md` and `rubric/SOURCE.md` are in
+place, and the findings are in `SCORING.md` §3 and §10. Kept for reference:
+
 ```
 Read AGENTS.md and docs/SCORING.md §3.
 Task: fetch the official public IELTS Writing Task 2 band descriptors (all four criteria,
