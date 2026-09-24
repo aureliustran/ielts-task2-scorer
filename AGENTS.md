@@ -25,7 +25,7 @@ worker/          Python 3.11+; no Postgres access
   checklist/     narrow LLM judgment questions
   prompts/       versioned prompt files ({name}.v{N}.txt)
   tests/         pytest; fixtures in tests/fixtures/
-evaluator/       offline eval; imports worker's pipeline; data/, results/
+evaluation/      offline eval; imports worker's pipeline; data/, results/
 rubric/          official descriptor text (fetched, never paraphrased)
 docker-compose.yml   postgres (pgvector), redis, languagetool
 ```

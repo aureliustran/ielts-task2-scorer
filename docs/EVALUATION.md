@@ -1,7 +1,7 @@
 # Evaluation — measuring the scorer
 
 How the scorer is measured against official examiner bands. The code lives in
-`evaluator/`. The findings go in `EVAL.md`, which the developer writes from the generated
+`evaluation/`. The findings go in `EVAL.md`, which the developer writes from the generated
 reports.
 
 ## 1. What the eval set is, and isn't
@@ -19,30 +19,55 @@ reports.
   4. **Few-shot examples.**
   5. **Later, calibrating feature thresholds** (task L4).
 
-## 2. File: `evaluator/data/essays.jsonl`
+## 2. File: `evaluation/data/essays.csv`
 
-One JSON object per line:
+Maintained by hand in a spreadsheet and exported as UTF-8 CSV with a header row. One row
+per essay, columns in this order:
 
-```json
-{"id": "cam17-t2-test1", "prompt": "...", "essay": "...",
- "overall": 6.5, "tr": 6, "cc": 7, "lr": 6, "gra": 6,
- "source": "Cambridge IELTS 17, Test 1", "published": "2022-05",
- "fewshot": false}
+```
+id,prompt,essay,overall,tr,cc,lr,gra,comment,source,published,fewshot
 ```
 
-| Field | Rule |
+| Column | Rule |
 |---|---|
-| `id` | Unique, stable, never reused |
-| `overall` | Official overall Task 2 band. **Required.** |
-| `tr`, `cc`, `lr`, `gra` | Official criterion bands, or `null` if the source doesn't publish them |
-| `source` | Book and test number, or page title plus URL |
-| `published` | `YYYY-MM` (or `YYYY-01` if only the year is known) when the essay was first published |
-| `fewshot` | `true` for the 1-2 essays used as few-shot examples |
+| `id` | Unique, stable, never reused, e.g. `cam17-t2-test1` |
+| `prompt` | The Task 2 question, exactly as printed |
+| `essay` | The candidate's text exactly as printed, errors included. Paragraphs separated by a blank line inside the cell |
+| `overall` | Official Task 2 band as printed (may be a half band, e.g. 5.5). **Required.** |
+| `tr`, `cc`, `lr`, `gra` | Official criterion bands (whole numbers), or **empty** if the source doesn't publish them. Never derived from the comment |
+| `comment` | The examiner comment, verbatim, or empty. Kept for reviewing the scorer's feedback; not used in any metric |
+| `source` | Book and test number, or document title plus URL |
+| `published` | `YYYY-MM` (or `YYYY-01` if only the year is known) when the essay was first published. Books: the copyright page. Undated documents: the earliest plausible date, so they land in dev, never test |
+| `fewshot` | `TRUE` for the 1-2 essays used as few-shot examples, otherwise `FALSE` or empty |
+
+**Spreadsheet pitfalls:**
+- Format the `published` column as **Plain text** before typing, or the spreadsheet turns
+  `2022-05` into a date.
+- To paste a multi-paragraph essay, **double-click the cell first** (or paste into the
+  formula bar). Pasting onto a selected cell splits the paragraphs across rows.
+- Export as **CSV UTF-8** (Excel) or File → Download → CSV (Google Sheets).
+
+**Loader rules** (`evaluation/data.py`, stdlib `csv.DictReader`, `encoding="utf-8-sig"` so an
+Excel BOM is harmless):
+- Empty criterion cells become `None`. `fewshot` is true for `true` (any letter case) or `1`.
+- `\r\n` inside cells is normalised to `\n`.
+- Fail with the row number on:
+  - a duplicate `id`
+  - a missing `prompt`/`essay`/`overall`/`published`
+  - `overall` outside 0-9 or not a multiple of 0.5
+  - a criterion band that isn't a whole number 0-9
+  - `published` not matching `YYYY-MM`
 
 Essays come only from official sources: the Cambridge IELTS books (examiner-marked sample
-answers) and official IELTS / British Council / IDP pages.
+answers) and official IELTS / British Council / IDP documents. General Training Task 2
+essays count too, because the same Task 2 band descriptors apply to both tests.
 
-**Copyright:** the book essays are copyrighted. If the repo is public, keep `essays.jsonl`
+**Expect mostly overall-only bands.** The official samples checked so far (the ielts.org
+example-responses PDFs) print one Task 2 band plus a comment, with no per-criterion
+bands. So the **overall** metrics are the headline. The per-criterion metrics in §6 are
+reported only for the essays that have criterion bands, and may have n = 0.
+
+**Copyright:** the book essays are copyrighted. If the repo is public, keep `essays.csv`
 git-ignored and back it up elsewhere.
 
 ## 3. Splits: by publication date, not by hand
@@ -55,7 +80,7 @@ from memory rather than judgment. This can't be avoided, so it gets measured ins
 - **test** = essays with `published` after the cutoff. **dev** = everything else.
 - The split therefore depends on the model. That's fine, because `model` is stored with
   every result.
-- **Near-duplicates:** before any run, the evaluator embeds all essays (`EMBEDDING_MODEL`)
+- **Near-duplicates:** before any run, the eval embeds all essays (`EMBEDDING_MODEL`)
   and lists dev/test pairs with cosine distance < 0.1. The same essay reprinted in a newer
   book would otherwise be a contaminated "test" essay. It only warns; the developer fixes
   the data.
@@ -64,8 +89,9 @@ from memory rather than judgment. This can't be avoided, so it gets measured ins
 
 ## 4. Few-shot examples
 
-- Only essays with `fewshot: true`. They must be in dev, have all four criterion bands, and
-  are excluded from every metric in every condition, so conditions stay comparable.
+- Only essays with `fewshot` = TRUE. They must be in dev and are excluded from every metric
+  in every condition, so conditions stay comparable. Prefer essays with criterion bands.
+  Overall-only essays are fine, and are rendered as "Official overall band: X".
 - They are rendered into P3 as in `SCORING.md` §6.3.
 
 ## 5. Conditions and runs
@@ -89,7 +115,7 @@ from memory rather than judgment. This can't be avoided, so it gets measured ins
   apart; EVAL.md should say so.
 - Compare conditions **only within one model**. Cheap models are fine while iterating.
 
-## 6. Metrics (`evaluator/metrics.py`)
+## 6. Metrics (`evaluation/metrics.py`)
 
 The model's score per essay per condition = the **median** band across runs (criteria), and
 `round_writing_band` of the median-band mean (overall).
@@ -129,7 +155,7 @@ The model's score per essay per condition = the **median** band across runs (cri
 
 ## 8. Outputs
 
-`evaluator/results/{YYYYMMDD-HHMMSS}/`:
+`evaluation/results/{YYYYMMDD-HHMMSS}/`:
 - `config.json`: the command-line args, model, temperature, prompt versions and the list
   of essay ids per split.
 - `runs.jsonl`: one line per essay × condition × run: `{essay_id, condition, run, result}`,

@@ -44,7 +44,7 @@ client (React/Vite) --/api--> server (Go/Gin) --LPUSH queue:jobs--> worker (Pyth
 | client | `client/` | UI. Talks only to the server, through `/api`. |
 | server | `server/` | Auth, all Postgres reads/writes, job creation, result persistence. **The only service that touches Postgres.** |
 | worker | `worker/` | Scoring pipeline, LLM calls, embeddings. Talks only to Redis, LanguageTool and the LLM provider. |
-| evaluator | `evaluator/` | Offline eval. Imports the worker's pipeline directly. Touches neither Redis nor Postgres. |
+| evaluation | `evaluation/` | Offline eval; not a running service. Imports the worker's pipeline directly. Touches neither Redis nor Postgres. |
 
 Infrastructure is in `docker-compose.yml`: Postgres (pgvector/pg16), Redis 7 and
 LanguageTool (port 8010).
@@ -61,7 +61,7 @@ is the list of keys. Add every new key there.
 | `worker/.env` | `REDIS_URL`, `LANGUAGETOOL_URL`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_TEMPERATURE`, `EMBEDDING_MODEL`, `EMBEDDING_DIM`. No Postgres keys, on purpose. |
 | `client/.env` | `VITE_API_URL`: the server address, used only as the Vite dev-proxy target. Never put a secret here; every `VITE_` var ends up in the browser bundle. |
 
-The evaluator uses the worker's venv and `worker/.env`. It has no `.env` of its own.
+The eval uses the worker's venv and `worker/.env`. It has no `.env` of its own.
 
 **Server load order:** `godotenv.Load("../.env")` first, then `godotenv.Load(".env")`.
 godotenv doesn't override variables that are already set, so the root file stays the
@@ -97,7 +97,7 @@ dbURL := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
 {"job_id": 42, "essay_id": 7, "prompt": "...", "essay": "..."}
 ```
 The worker scores with its default settings (`SCORING.md` §2). Eval conditions are chosen
-in the evaluator, never through the queue.
+in the eval, never through the queue.
 
 **Result message** (worker → server, stream fields, all strings):
 ```

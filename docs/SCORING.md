@@ -22,7 +22,7 @@ stored-result shape must match this file exactly.
 ## 2. Pipeline
 
 `scoring.pipeline.score(prompt_text, essay_text, evidence=True, fewshot=None, cache_tag=None) -> dict`
-returns the stored result (§8). The worker calls it with the defaults. The evaluator sets
+returns the stored result (§8). The worker calls it with the defaults. The eval sets
 `evidence`, `fewshot` and `cache_tag`.
 
 | # | Stage | Module | LLM calls | Runs when |
@@ -369,7 +369,7 @@ class TaskAnalysis(BaseModel):      # P2
     main_ideas: list[MainIdea]
 ```
 
-### 8.2 Stored result (the `results.result` JSONB and the evaluator's `runs.jsonl` rows)
+### 8.2 Stored result (the `results.result` JSONB and the eval's `runs.jsonl` rows)
 
 ```json
 {
@@ -424,7 +424,7 @@ class TaskAnalysis(BaseModel):      # P2
    `sha256(model, temperature, rendered system, rendered user, schema name, cache_tag)` and
    the file is `worker/.cache/llm/{key}.json`. A hit returns without a network call and
    with `cached=true`. The app passes `None`, except P1, which always uses `cache_tag="p1"`.
-   The evaluator passes `"run{n}"`, so repeat runs stay independent but re-running an eval
+   The eval passes `"run{n}"`, so repeat runs stay independent but re-running an eval
    is free.
 6. `call_meta = {prompt, version, model, input_tokens, output_tokens, latency_ms, cached}`.
 

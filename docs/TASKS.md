@@ -38,7 +38,7 @@ Task: scaffold the Python worker.
   Setup note in worker/README.md: `python -m spacy download en_core_web_sm` (never at
   import time).
 - Empty packages: worker/features, worker/checklist, worker/scoring, worker/tests
-  (+ tests/fixtures), and evaluator/ at the repo root.
+  (+ tests/fixtures), and evaluation/ at the repo root.
 - worker/features/lt_client.py: thin wrapper over LANGUAGETOOL_URL (remote_server).
   check(text, lang) -> list of matches with category id, message, offset, length.
 - Add worker/.cache/ to .gitignore.
@@ -123,17 +123,20 @@ Out of scope: features, checklist, queue, eval.
 
 ## T5 — Eval runner
 
-✍ Before starting: collect the official graded essays into `evaluator/data/essays.jsonl`
-(`EVALUATION.md` §2). Mark 1-2 dev essays with all four bands as `fewshot: true`. Look up
+✍ Before starting: collect the official graded essays into `evaluation/data/essays.csv`
+(`EVALUATION.md` §2). Set `fewshot` to TRUE on 1-2 dev essays. Look up
 your model's training cutoff.
 
 ```
 Read AGENTS.md and docs/EVALUATION.md (all of it).
-Task: evaluator/run_eval.py and evaluator/metrics.py exactly as EVALUATION.md:
+Task: evaluation/data.py, evaluation/run_eval.py and evaluation/metrics.py exactly as EVALUATION.md:
+the CSV loader and its validation (§2),
 flags (§5), cutoff split and near-duplicate warning (§3), few-shot handling (§4), all
 metrics with n and bootstrap intervals (§6), dry-run (§7), outputs (§8).
 Call scoring.pipeline.score with cache_tag=f"run{n}".
-Tests: every metric function against small hand-computed examples written in the test
+Tests: the loader on a small CSV written in the test (multi-line essay cell, empty criterion
+cells → None, BOM, and each validation failure); every metric function against small
+hand-computed examples written in the test
 (MAE only on true 0-7; adjacent; median of runs; false-8 rate; suggestive precision;
 run-to-run variation); QWK equals sklearn's on a small example; split assignment around
 the cutoff month; fewshot essays excluded from metrics; bootstrap is deterministic with the
@@ -264,7 +267,7 @@ Out of scope: PDF upload.
   `lr.collocations_judged`, `lr.unnatural_collocation_rate` plus the evidence clause.
 - **L3 — Cohesion/relevance:** `cc.adjacent_similarity_mean`, P5 (`paragraph_ideas.v1.txt`)
   → `cc.paragraph_central_idea`, `tr.paragraph_relevance` plus evidence clauses.
-- **L4 — Calibration and conflict flags:** `evaluator/calibrate.py` derives per-feature
+- **L4 — Calibration and conflict flags:** `evaluation/calibrate.py` derives per-feature
   cut-offs from dev (the features with a meaningful Spearman correlation in the reports).
   Then `scoring/conflicts.py` flags an LLM band that disagrees with the features. Thresholds
   are proposed by the script and approved by the developer, never hardcoded by an agent.
