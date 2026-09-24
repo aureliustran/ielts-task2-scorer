@@ -19,7 +19,7 @@ before starting the task.
 | Scorer | T0-T4 | Score one essay from the terminal (P3 only) |
 | Eval | T5 | Baseline numbers, evidence off |
 | Evidence | T6-T9 | Features + checklist; eval evidence off vs on |
-| Web stack | T10-T12 | Client → server → Redis → worker → back. Can start any time after T4 |
+| Web stack | A0, T10-T12 | Audit code generator, then client → server → Redis → worker → back. Can start any time after T4 |
 | Later | L1-L5 | Only when the eval shows a gap (L1-L4) or for polish (L5) |
 
 Tests never use hand-marked essays. Feature tests are **property tests**: constructed text
@@ -213,31 +213,50 @@ evidence off vs on table.
 Out of scope: P4, P5.
 ```
 
+## A0 — Audit code generator
+
+Required before T10. `audit/codes.json` already exists.
+
+```
+Read AGENTS.md and docs/SPEC.md §11.
+Task: audit/generate.py (Python stdlib only) exactly as SPEC §11.2: validate
+audit/codes.json, write the three generated files, and support --check.
+Tests (audit/test_generate.py, pytest): each validation rule fails on a small bad
+catalogue written in the test and names the offending code; generation is deterministic
+(two runs produce identical bytes); --check passes right after generating and fails after
+a generated file is edited; the generated Python file imports and PARAMS matches the JSON.
+Then run it on the real catalogue and paste the output and `--check`'s exit code.
+Out of scope: using the codes in any service.
+```
+
 ## T10 — Server: config, DB, auth
 
 ```
-Read AGENTS.md and docs/SPEC.md §4, §5, §8, §9 (login row).
-Task: server/ Go module. cmd/api/main.go; internal/{config,db,auth}; migrations/00001_init.sql
+Read AGENTS.md and docs/SPEC.md §4, §5, §8, §9 (login row and "Errors") and §11.
+Task: server/ Go module. cmd/api/main.go; internal/{config,db,auth,audit}; migrations/00001_init.sql
 exactly as SPEC §8 (goose). Env load order per §4. Startup upserts the admin hash. POST
-/api/login and the auth middleware per §5.
+/api/login and the auth middleware per §5. internal/audit: render a Def with params,
+write an audit_log row, the X-Request-ID middleware, and the §9 error response. Uses the
+generated codes_gen.go; never hardcode a code string.
 Tests (go test ./...): cookie sign/verify, expired cookie rejected, tampered cookie
-rejected, middleware 401. Paste `goose up` output and a curl login (204 then 401 with a
-wrong password).
+rejected, middleware 401 with body code AUTH003; rendering fills every placeholder of
+every code in ByCode; a missing param is an error. Paste `goose up` output and a curl
+login (204 then 401 with a wrong password), plus the audit_log rows it wrote.
 Out of scope: essays, jobs, queue.
 ```
 
 ## T11 — Queue round trip
 
 ```
-Read AGENTS.md and docs/SPEC.md §6, §7, §9.
+Read AGENTS.md and docs/SPEC.md §6, §7, §9, §11.
 Task:
 - server: POST /api/essays, GET /api/jobs/:id, the result consumer and the timeout sweeper,
-  exactly per SPEC §6-§7.
+  exactly per SPEC §6-§7, with the audit rows from §7 and §9.
 - worker/embedding.py (EMBEDDING_MODEL, normalised, loaded once) and worker/main.py (the
-  worker loop in SPEC §6).
+  worker loop in SPEC §6, exception mapping per SPEC §11.4 using worker/audit_codes.py).
 Tests: go test for the consumer's persist function (a replay of the same message is a
-no-op) against the docker Postgres; pytest for main.py's message handling with
-scoring.pipeline.score mocked.
+no-op and writes no second audit row) against the docker Postgres; pytest for main.py's
+message handling with scoring.pipeline.score mocked, one test per row of SPEC §11.4.
 Check, pasted: POST an essay with curl → poll until done → the results row exists and
 essays.embedding is not null. Then stop the server mid-job, restart it, and show that the
 pending result is still persisted.
@@ -251,7 +270,7 @@ Read AGENTS.md, docs/SPEC.md §9-§10 and docs/SCORING.md §7 (UI display).
 Task:
 - server: GET /api/essays, GET /api/essays/:id, GET /api/essays/:id/similar (SPEC §9 query).
 - client: replace the Vite template with the SPEC §10 screens. Vite proxy for /api.
-  Display rules from SCORING §7.
+  Display rules from SCORING §7. Error toasts per SPEC §10, using src/auditCodes.ts.
 Check, pasted: `npm run build` and `npm run lint` output, go test output, and a
 description of submitting an essay end to end in the browser.
 Out of scope: PDF upload.

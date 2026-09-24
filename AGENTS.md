@@ -27,6 +27,7 @@ worker/          Python 3.11+; no Postgres access
   tests/         pytest; fixtures in tests/fixtures/
 evaluation/      offline eval; imports worker's pipeline; data/, results/
 rubric/          official descriptor text (fetched, never paraphrased)
+audit/           codes.json (every audit/error code) + generate.py (writes each service's copy)
 docker-compose.yml   postgres (pgvector), redis, languagetool
 ```
 
@@ -57,7 +58,10 @@ Each service has its own git-ignored `.env`. `docs/SPEC.md` §4 says what goes w
 10. **Don't change tests to make them pass.** If an expected value looks wrong, say so and
     stop.
 11. **Don't touch files in `docs/`** unless the task says to.
-12. **Follow the git workflow below.** Never commit, merge or push directly to `master` or
+12. **Audit codes come only from `audit/codes.json`.** Never hardcode a code string or
+    edit a generated file (`codes_gen.go`, `audit_codes.py`, `auditCodes.ts`); edit the
+    JSON and run `python audit/generate.py` (`docs/SPEC.md` §11).
+13. **Follow the git workflow below.** Never commit, merge or push directly to `master` or
     `dev`.
 
 ## Git workflow
