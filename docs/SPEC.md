@@ -105,12 +105,13 @@ job_id     "42"
 status     "done" | "failed"
 result     stored-result JSON (SCORING.md §8), "" if failed
 embedding  JSON array of EMBEDDING_DIM floats, "" if failed or the essay was rejected
-error      "" or a message plus the last 800 chars of the traceback
+error      "" or {"code": "LLM001", "params": {"stage": "judge"}} (§11); never a traceback
 ```
 
 **Worker loop** (`worker/main.py`): `BRPOP queue:jobs` → for each pipeline stage,
 `HSET job:{id} stage <name>` and `EXPIRE job:{id} 3600` → run `scoring.pipeline.score` →
-compute the embedding → `XADD stream:results`. Any exception: `XADD` with `status=failed`.
+compute the embedding → `XADD stream:results`. Any exception: map it to an audit code
+(§11.4), `XADD` with `status=failed`, and write the traceback to the worker's log only.
 One job at a time.
 
 ## 7. Server behaviour
@@ -121,20 +122,32 @@ One job at a time.
    `Count: 50, Block: 5s`.
 3. Per message, in one transaction:
    `INSERT INTO results ... ON CONFLICT (job_id) DO NOTHING`, update the `jobs` row
-   (status, error, completed_at), and `UPDATE essays SET embedding = $1::vector` (text form
-   `[0.1,0.2,...]`) if an embedding is present.
+   (status, completed_at), `UPDATE essays SET embedding = $1::vector` (text form
+   `[0.1,0.2,...]`) if an embedding is present, and insert one `audit_log` row: `JOB002`
+   when done, or the worker's `{code, params}` when failed (§11). Skip the audit insert if
+   the `results` insert was a no-op, so a replay doesn't write a second row.
 4. `XACK` **only after commit**. A failed commit leaves the message pending for a retry, and
    the upsert makes replays harmless. A result that arrives after a timeout still wins.
 
 **Timeout sweeper** (goroutine, every 30 s):
 ```sql
-UPDATE jobs SET status='failed', error='timeout', completed_at=now()
-WHERE status='pending' AND created_at < now() - make_interval(secs => $JOB_TIMEOUT_SECONDS);
+WITH timed_out AS (
+  UPDATE jobs SET status='failed', completed_at=now()
+  WHERE status='pending' AND created_at < now() - make_interval(secs => $1)
+  RETURNING id
+)
+INSERT INTO audit_log (code, message, params, job_id)
+SELECT 'JOB003', replace($2, '{jobId}', id::text),
+       jsonb_build_object('jobId', id, 'timeoutSeconds', $1), id
+FROM timed_out;
 ```
+`$1` = `JOB_TIMEOUT_SECONDS`; `$2` = the `JOB003` message rendered in Go with every
+parameter except `jobId`.
 
 **Job status.** `jobs.status` in Postgres is `pending | done | failed`. `GET /api/jobs/:id`
 reports `processing` when the row is `pending` and `job:{id}` exists in Redis, and includes
-its `stage`.
+its `stage`. A failed job's error is its latest `audit_log` row (the failure is always the
+last row written for a job).
 
 ## 8. Postgres schema (`server/migrations/00001_init.sql`, goose)
 
@@ -160,7 +173,6 @@ CREATE TABLE jobs (
   id           SERIAL PRIMARY KEY,
   essay_id     INT NOT NULL REFERENCES essays(id),
   status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','done','failed')),
-  error        TEXT,
   created_at   TIMESTAMPTZ DEFAULT now(),
   completed_at TIMESTAMPTZ
 );
@@ -180,11 +192,22 @@ CREATE TABLE results (
   created_at         TIMESTAMPTZ DEFAULT now()
 );
 
+CREATE TABLE audit_log (
+  id         BIGSERIAL PRIMARY KEY,
+  code       TEXT NOT NULL,                 -- a key of audit/codes.json, e.g. 'RES001'
+  message    TEXT NOT NULL,                 -- rendered when written; exactly what was shown
+  params     JSONB NOT NULL DEFAULT '{}',
+  job_id     INT REFERENCES jobs(id),       -- set when the event is about a job
+  request_id TEXT,                          -- set when the event came from an HTTP request
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
 CREATE INDEX ON jobs (essay_id);
 CREATE INDEX ON results (essay_id);
+CREATE INDEX ON audit_log (job_id);
 
 -- +goose Down
-DROP TABLE results, jobs, essays, admin_credentials;
+DROP TABLE audit_log, results, jobs, essays, admin_credentials;
 ```
 
 The flat columns duplicate fields from `result` so they can be queried without JSON
@@ -194,9 +217,9 @@ operators. The eval set is not stored in Postgres (`EVALUATION.md` §2).
 
 | Method | Path | Does |
 |---|---|---|
-| POST | `/login` | §5. 204 plus cookie, or 401. |
-| POST | `/essays` | Body `{prompt, essay}`. 400 if `prompt` is blank. The essay may be blank (the worker rejects it with a score). Inserts the essay and a `pending` job, then `LPUSH`es the job message. If the push fails, marks the job `failed` and returns 503. Returns `{essay_id, job_id}`. |
-| GET | `/jobs/:id` | `{status: pending\|processing\|done\|failed, stage?, error?, result?}`. `result` is the JSONB, included when `done`. |
+| POST | `/login` | §5. 204 plus cookie and audit `AUTH001`, or `AUTH002` (401). |
+| POST | `/essays` | Body `{prompt, essay}`. `VAL001` (400) if `prompt` is blank. The essay may be blank (the worker rejects it with a score). Inserts the essay and a `pending` job, then `LPUSH`es the job message and audits `JOB001`. If the push fails, marks the job `failed` and returns `SYS001` (503). Returns `{essay_id, job_id}`. |
+| GET | `/jobs/:id` | `{status: pending\|processing\|done\|failed, stage?, error?, result?}`. `result` is the JSONB, included when `done`; `error` is `{code, message}` from the job's latest `audit_log` row, included when `failed`. |
 | GET | `/essays?limit=20` | History, newest first: `{id, created_at, prompt (first 120 chars), overall_band, overall_confidence}`. |
 | GET | `/essays/:id` | The essay plus its latest result. |
 | GET | `/essays/:id/similar?limit=5` | Nearest essays by cosine distance, excluding itself and rows with no embedding. |
@@ -212,6 +235,13 @@ LEFT JOIN LATERAL (SELECT overall_band FROM results WHERE essay_id = e.id
 WHERE e.id <> $1 AND e.embedding IS NOT NULL AND t.embedding IS NOT NULL
 ORDER BY distance LIMIT $2;
 ```
+
+**Errors:** every non-2xx response has the body
+`{"error": {"code": "RES001", "message": "...", "request_id": "..."}}`, with the HTTP status
+from the code's `http` in `audit/codes.json`, and the error is written to `audit_log`
+first (§11). Unknown ids return `RES001` (404); a missing or invalid session returns
+`AUTH003` (401); anything unexpected returns `SYS003` (500). Every response carries an
+`X-Request-ID` header (a random id generated per request).
 
 Go dependencies: `gin-gonic/gin`, `jackc/pgx/v5/pgxpool`, `redis/go-redis/v9`,
 `golang.org/x/crypto/bcrypt`, `joho/godotenv`. Migrations: `pressly/goose`.
@@ -229,5 +259,97 @@ Go dependencies: `gin-gonic/gin`, `jackc/pgx/v5/pgxpool`, `redis/go-redis/v9`,
 - **Result display rules** are in `SCORING.md` §7: suggestive badges and tooltip, the
   headline string, the under-250-words warning. Quotes with `quotes_verified=false` are
   shown struck through with the label "not found in essay".
-- **Error states:** failed job (show `error`), timeout, 401 (back to login), network error.
+- **Errors:** toast the server's `error.message` together with its `request_id`. The client
+  never renders messages itself. It branches only on codes from the generated
+  `src/auditCodes.ts`: `AUTH003` goes back to login. A failed job shows its `error.message`
+  on the progress screen. A network error (no response) toasts a fixed "Can't reach the
+  server" text.
 - Plain `fetch`, no state library. Pasted text only. PDF upload is a later task (`TASKS.md`).
+
+## 11. Audit codes and errors
+
+### 11.1 The catalogue: `audit/codes.json`
+
+The one source of truth for every audited event and every error, in all services. It is
+also the documentation: each code's `description` says when it is used.
+
+```json
+"RES001": {
+  "key": "resourceNotFound",
+  "level": "error",
+  "http": 404,
+  "params": ["resName", "resField", "resValue"],
+  "message": "{resName} not found with field {resField} that has value {resValue}.",
+  "description": "A looked-up row doesn't exist."
+}
+```
+
+| Field | Rule |
+|---|---|
+| code (the object key) | 2-5 capital letters (the group) + 3 digits, e.g. `RES001`. **Never renumbered or reused;** retire a code by leaving it in place with "Retired." at the start of its `description`. |
+| `key` | camelCase, unique. Becomes the constant name in each language. |
+| `level` | `info` (an audited action) or `error`. |
+| `http` | The HTTP status when the server returns this code as a response; `null` for codes never sent as an HTTP error (every `info` code, and worker/sweeper errors). |
+| `params` | The placeholder names in `message`, in order. Exactly the placeholders used, no more. |
+| `message` | Shown to the user and stored in `audit_log.message`. `{name}` placeholders only. Never secrets, passwords or essay text. |
+| `description` | For developers: when the code is used. |
+
+Groups: `AUTH` login and sessions · `RES` missing rows · `VAL` bad input · `JOB` job
+lifecycle · `LLM` model provider · `SYS` infrastructure and unexpected errors.
+
+### 11.2 Generated copies: `audit/generate.py`
+
+Services never read `audit/codes.json` at runtime: each is built and deployed on its own,
+and Go's `go:embed` can't reach outside `server/`. Instead, a stdlib-only script writes a
+copy into each service:
+
+| Output | Contains |
+|---|---|
+| `server/internal/audit/codes_gen.go` | A `Def` type (`Code, Key, Level, HTTP, Params, Message`), one exported `Def` var per code named after `key` in PascalCase, and `ByCode map[string]Def`. |
+| `worker/audit_codes.py` | One constant per code named after `key` in UPPER_SNAKE_CASE (`LLM_RATE_LIMITED = "LLM001"`), and `PARAMS: dict[str, tuple[str, ...]]`. |
+| `client/src/auditCodes.ts` | `export const AuditCode = {llmRateLimited: "LLM001", ...} as const` and `export type AuditCode`. |
+
+- Each output starts with `Code generated by audit/generate.py; DO NOT EDIT.` (as a comment
+  in that language). **Never edit a generated file by hand.**
+- `python audit/generate.py` validates `codes.json`, then writes all three files. It fails,
+  naming the code, on: a code not matching the format, a duplicate `key`, a `level` other
+  than `info`/`error`, an `http` that isn't `null` or an integer 400-599, an `info` code
+  with a non-null `http`, or placeholders in `message` that differ from `params`.
+- `python audit/generate.py --check` writes nothing and exits non-zero if any generated file
+  is missing or differs from what would be generated. CI runs it on every PR into `dev`.
+- Output is deterministic: codes sorted by code, no timestamps, `\n` line endings.
+- Adding a code: edit `codes.json`, run the script, commit the JSON and the three
+  generated files in the same PR.
+
+### 11.3 Who renders and who writes
+
+| Service | Does |
+|---|---|
+| server | The only service that renders messages (fills `{placeholders}` from `params`) and the only writer of `audit_log` (§8). Audits `AUTH*`, `JOB*`, its own `RES`/`VAL`/`SYS` errors, and the worker's failures. Returns errors as in §9. |
+| worker | Sends `{code, params}` only (§6). Never renders, never writes to Postgres. |
+| client | Toasts the server's rendered `message`; branches on codes (§10). Never renders. |
+
+An error is an audit entry, not a different kind of object: the same `code` + `params`
+(+ `job_id` / `request_id`), no extra fields. Services may add helper methods around it
+(e.g. `toHTTP()` in Go, an exception-to-code mapper in Python).
+
+### 11.4 Worker exception mapping
+
+`worker/main.py` is the only place that maps exceptions to codes, using the stage that was
+running (`params.stage`):
+
+| Exception | Code |
+|---|---|
+| `openai.RateLimitError` | `LLM001` |
+| `pydantic.ValidationError` from `scoring.llm.call_json` | `LLM002` |
+| any other `openai.APIError` (incl. connection errors) | `LLM003` |
+| LanguageTool connection error | `SYS002` |
+| anything else | `SYS003` |
+
+The traceback goes to the worker's log, never into the result message.
+
+### 11.5 What gets audited
+
+Meaningful events only: logins, essay submissions, job completion/failure and errors.
+Stage timings and token counts already live in the stored result (`SCORING.md` §8.2) and
+are not duplicated in `audit_log`.

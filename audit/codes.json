@@ -1,0 +1,114 @@
+{
+  "AUTH001": {
+    "key": "loginSucceeded",
+    "level": "info",
+    "http": null,
+    "params": [],
+    "message": "Login succeeded.",
+    "description": "POST /api/login accepted the password."
+  },
+  "AUTH002": {
+    "key": "loginFailed",
+    "level": "error",
+    "http": 401,
+    "params": [],
+    "message": "Incorrect password.",
+    "description": "POST /api/login rejected the password. Never put the attempted password in params."
+  },
+  "AUTH003": {
+    "key": "unauthorized",
+    "level": "error",
+    "http": 401,
+    "params": [],
+    "message": "Please log in.",
+    "description": "A protected route was called without a valid session cookie."
+  },
+  "RES001": {
+    "key": "resourceNotFound",
+    "level": "error",
+    "http": 404,
+    "params": ["resName", "resField", "resValue"],
+    "message": "{resName} not found with field {resField} that has value {resValue}.",
+    "description": "A looked-up row doesn't exist."
+  },
+  "VAL001": {
+    "key": "invalidInput",
+    "level": "error",
+    "http": 400,
+    "params": ["field", "problem"],
+    "message": "Invalid {field}: {problem}.",
+    "description": "A request body failed validation."
+  },
+  "JOB001": {
+    "key": "essaySubmitted",
+    "level": "info",
+    "http": null,
+    "params": ["essayId", "jobId"],
+    "message": "Essay {essayId} submitted for scoring as job {jobId}.",
+    "description": "POST /api/essays created an essay and queued its job."
+  },
+  "JOB002": {
+    "key": "jobDone",
+    "level": "info",
+    "http": null,
+    "params": ["jobId", "resultStatus"],
+    "message": "Job {jobId} finished: {resultStatus}.",
+    "description": "The result consumer stored a successful result (resultStatus = scored | rejected | too_short)."
+  },
+  "JOB003": {
+    "key": "jobTimedOut",
+    "level": "error",
+    "http": null,
+    "params": ["jobId", "timeoutSeconds"],
+    "message": "Scoring job {jobId} took longer than {timeoutSeconds} seconds and was stopped.",
+    "description": "The timeout sweeper failed a pending job."
+  },
+  "LLM001": {
+    "key": "llmRateLimited",
+    "level": "error",
+    "http": null,
+    "params": ["stage"],
+    "message": "The scoring model is rate-limited (stage: {stage}). Try again shortly.",
+    "description": "Worker: the provider returned 429 and the one retry also failed, or there was no Retry-After."
+  },
+  "LLM002": {
+    "key": "llmInvalidOutput",
+    "level": "error",
+    "http": null,
+    "params": ["stage"],
+    "message": "The scoring model returned an invalid answer twice (stage: {stage}).",
+    "description": "Worker: pydantic validation failed after the one repair call."
+  },
+  "LLM003": {
+    "key": "llmProviderError",
+    "level": "error",
+    "http": null,
+    "params": ["stage"],
+    "message": "The scoring model provider returned an error (stage: {stage}).",
+    "description": "Worker: any other openai API or connection error."
+  },
+  "SYS001": {
+    "key": "queueUnavailable",
+    "level": "error",
+    "http": 503,
+    "params": [],
+    "message": "The scoring queue is unavailable. Try again shortly.",
+    "description": "Server: LPUSH to queue:jobs failed."
+  },
+  "SYS002": {
+    "key": "languageToolUnavailable",
+    "level": "error",
+    "http": null,
+    "params": ["stage"],
+    "message": "The grammar checker is unavailable (stage: {stage}).",
+    "description": "Worker: LanguageTool could not be reached."
+  },
+  "SYS003": {
+    "key": "internalError",
+    "level": "error",
+    "http": 500,
+    "params": [],
+    "message": "Something went wrong.",
+    "description": "Any unexpected exception, in any service. Details go to that service's log only."
+  }
+}
