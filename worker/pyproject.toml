@@ -1,0 +1,24 @@
+[project]
+name = "worker"
+version = "0.0.1"
+requires-python = ">=3.11"
+dependencies = [
+    "spacy",
+    "wordfreq",
+    "language_tool_python",
+    "sentence-transformers",
+    "pydantic",
+    "openai",
+    "python-dotenv",
+    "redis",
+    "scipy",
+    "scikit-learn",
+    "pytest",
+]
+
+[tool.setuptools]
+packages = ["features", "checklist", "scoring"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
