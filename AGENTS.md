@@ -57,6 +57,22 @@ Each service has its own git-ignored `.env`. `docs/SPEC.md` §4 says what goes w
 10. **Don't change tests to make them pass.** If an expected value looks wrong, say so and
     stop.
 11. **Don't touch files in `docs/`** unless the task says to.
+12. **Follow the git workflow below.** Never commit, merge or push directly to `master` or
+    `dev`.
+
+## Git workflow
+- `master` = production. Every merge into `master` is deployed automatically by CI/CD.
+- `dev` = integration. Agreed features land here first.
+- Every task gets its own branch **off `dev`**: `git switch -c <type>/<short-name> origin/dev`
+  (`feat/`, `fix/`, `chore/`, `docs/`; tasks from `docs/TASKS.md` may use `t<N>-<name>`).
+- Commit and push only that branch, then open a PR **into `dev`**. Never target `master`.
+- `dev` → `master` (a release, auto-deployed) happens only through a PR. Agents open it only
+  when the prompt asks for it, and never merge or approve it.
+- Never force-push, rewrite history on, or delete `master` or `dev`.
+- Commit or push only when the user asks.
+
+Claude Code enforces this with a hook (`.claude/hooks/guard-branches.sh`); GitHub branch
+protection enforces it for everyone else.
 
 ## Definition of done (every task)
 - Code + tests written, tests pass, output shown
